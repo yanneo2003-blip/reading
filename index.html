@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 深度阅读助理 (全功能修复版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    
+    <!-- GitHub 开源解析库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs/dist/epub.min.js"></script>
+
+    <style>
+        body { background-color: #F5F5F7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #37352F; }
+        
+        /* FlowUs Card Style */
+        .flowus-card {
+            background: #FFFFFF;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+            border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 12px;
+        }
+
+        /* Typography */
+        .prose h1 { font-size: 1.75em; font-weight: 700; margin: 1.5em 0 0.8em; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+        .prose h2 { font-size: 1.4em; font-weight: 600; background: #F7F6F3; padding: 4px 10px; border-radius: 6px; margin-top: 1.5em; display: inline-block; color: #2a2a2a; }
+        .prose h3 { font-size: 1.2em; font-weight: 600; margin-top: 1.2em; color: #444; border-left: 4px solid #FDE047; padding-left: 10px; }
+        .prose p { margin-bottom: 1em; line-height: 1.75; color: #37352F; }
+        .prose ul { list-style: disc; padding-left: 1.5em; margin-bottom: 1em; }
+        .prose blockquote { border-left: 3px solid #3B82F6; background: #EFF6FF; padding: 0.5em 1em; color: #1E3A8A; border-radius: 0 4px 4px 0; margin: 1em 0; }
+        .prose strong { color: #111; background: rgba(255,212,0,0.2); padding: 0 2px; border-radius: 2px; }
+
+        /* Animation */
+        .cursor-blink { animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-6">
+
+    <header class="w-full max-w-4xl flex justify-between items-center mb-6">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center text-xl shadow-lg">
+                <i class="fa-solid fa-book-open-reader"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-gray-800 text-lg">AI 深度阅读</h1>
+                <p class="text-xs text-gray-500">FlowUs Style · 全功能版</p>
+            </div>
+        </div>
+        <button onclick="toggleSettings()" class="text-sm bg-white border px-3 py-1.5 rounded-lg hover:bg-gray-50 shadow-sm transition-colors flex items-center gap-2">
+            <i class="fa-solid fa-gear"></i> API 设置
+        </button>
+    </header>
+
+    <main class="w-full max-w-4xl flex flex-col gap-6">
+        <!-- Upload Zone -->
+        <div id="upload-zone" class="bg-white border-2 border-dashed border-gray-300 rounded-xl p-10 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer relative group">
+            <input type="file" id="file-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" accept=".txt,.md,.pdf,.docx,.epub">
+            <div class="pointer-events-none">
+                <i class="fa-solid fa-cloud-arrow-up text-4xl text-gray-300 group-hover:text-blue-500 mb-3 transition-colors"></i>
+                <h3 class="font-medium text-gray-700">点击或拖拽上传书籍</h3>
+                <p class="text-xs text-gray-400 mt-1">支持 PDF, DOCX, EPUB, TXT</p>
+            </div>
+            <div id="file-status" class="hidden absolute top-3 right-3 bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold shadow-sm z-20">
+                <i class="fa-solid fa-check mr-1"></i> <span id="filename-display"></span>
+            </div>
+        </div>
+
+        <!-- Start Button -->
+        <button id="generate-btn" onclick="startAnalysis()" class="hidden w-full bg-gray-900 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-black transition-transform active:scale-[0.99] flex items-center justify-center gap-2">
+            <i class="fa-solid fa-sparkles text-yellow-400"></i> 开始深度分析
+        </button>
+
+        <!-- Result Card (无封面版) -->
+        <div id="result-card" class="hidden flowus-card overflow-hidden animate-[fadeIn_0.5s_ease-out]">
+            
+            <div class="p-10 relative">
+                <div class="flex justify-between items-start">
+                    <!-- Icon -->
+                    <div class="w-16 h-16 bg-gray-50 rounded-xl flex items-center justify-center text-3xl border border-gray-100 shadow-sm">📖</div>
+                    
+                    <!-- View Toggle -->
+                    <div class="flex bg-gray-100 rounded-lg p-1 text-xs">
+                        <button onclick="switchView('preview')" id="btn-preview" class="px-3 py-1 bg-white rounded shadow-sm font-medium text-gray-800 transition-all">预览</button>
+                        <button onclick="switchView('raw')" id="btn-raw" class="px-3 py-1 text-gray-500 hover:text-gray-800 transition-all">源码</button>
+                    </div>
+                </div>
+
+                <h1 id="doc-title" class="text-3xl font-bold text-gray-900 mt-6 mb-6 pb-2 border-b border-gray-100">未命名文档</h1>
+
+                <!-- Properties -->
+                <div class="flex flex-wrap gap-y-2 gap-x-6 text-sm text-gray-600 mb-8 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                    <div class="flex items-center gap-2 min-w-[120px]">
+                        <i class="fa-regular fa-clock text-gray-400"></i> 
+                        <span class="text-gray-400">时间</span>
+                        <span id="prop-time" class="font-medium text-gray-800 ml-auto">--:--</span>
+                    </div>
+                    <div class="flex items-center gap-2 min-w-[120px]">
+                        <i class="fa-solid fa-robot text-gray-400"></i> 
+                        <span class="text-gray-400">模型</span>
+                        <span id="prop-model" class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded text-xs ml-auto">--</span>
+                    </div>
+                    <div class="flex items-center gap-2 min-w-[120px]">
+                        <i class="fa-solid fa-align-left text-gray-400"></i> 
+                        <span class="text-gray-400">字数</span>
+                        <span id="prop-words" class="font-medium text-gray-800 ml-auto">--</span>
+                    </div>
+                    <div id="status-text" class="text-orange-500 font-medium animate-pulse ml-auto hidden">Running...</div>
+                </div>
+
+                <!-- Content Area -->
+                <div id="markdown-output" class="prose max-w-none text-gray-800 min-h-[200px]"></div>
+                <textarea id="raw-output" class="hidden w-full h-[400px] p-4 bg-gray-50 text-xs font-mono border rounded-lg resize-y focus:outline-none" readonly></textarea>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings Modal (全功能回归) -->
+    <div id="settings-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm hidden flex items-center justify-center z-50">
+        <div class="bg-white w-full max-w-md rounded-2xl p-6 shadow-2xl transform transition-all scale-100">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">API 配置</h2>
+                <button onclick="toggleSettings()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <!-- 预设按钮组 -->
+            <div class="grid grid-cols-2 gap-3 mb-5">
+                <button onclick="applyPreset('gemini')" class="p-3 border rounded-xl hover:border-indigo-500 hover:bg-indigo-50 text-left transition-all group">
+                    <div class="font-bold text-indigo-600 text-sm mb-1"><i class="fa-brands fa-google"></i> Gemini (免费)</div>
+                    <div class="text-[10px] text-gray-500 group-hover:text-indigo-400">推荐测试 · 速度快</div>
+                </button>
+                <button onclick="applyPreset('openai')" class="p-3 border rounded-xl hover:border-green-500 hover:bg-green-50 text-left transition-all group">
+                    <div class="font-bold text-green-600 text-sm mb-1"><i class="fa-solid fa-bolt"></i> OpenAI / 中转</div>
+                    <div class="text-[10px] text-gray-500 group-hover:text-green-400">GPT-4 · DeepSeek</div>
+                </button>
+            </div>
+
+            <hr class="border-gray-100 mb-5">
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">API Base URL</label>
+                    <input type="text" id="api-url" class="w-full text-sm p-2 bg-gray-50 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="https://api.openai.com/v1">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">API Key</label>
+                    <div class="relative">
+                        <input type="password" id="api-key" class="w-full text-sm p-2 bg-gray-50 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <button onclick="toggleEye()" class="absolute right-3 top-2.5 text-gray-400 text-xs"><i class="fa-regular fa-eye"></i></button>
+                    </div>
+                    <div id="gemini-link" class="hidden mt-1 text-right">
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-[10px] text-blue-500 hover:underline">👉 点击获取 Gemini Key</a>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">模型名称 (Model)</label>
+                    <input type="text" id="api-model" class="w-full text-sm p-2 bg-gray-50 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="gpt-4o">
+                </div>
+            </div>
+
+            <div class="mt-6 flex gap-3">
+                <button onclick="testConnection()" id="test-btn" class="flex-1 py-2 border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+                    测试连接
+                </button>
+                <button onclick="saveSettings()" class="flex-1 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-black transition-colors shadow-lg">
+                    保存配置
+                </button>
+            </div>
+            <div id="msg-box" class="mt-2 text-center text-xs h-4"></div>
+        </div>
+    </div>
+
+    <script>
+        // ================= 全局配置与 Prompt =================
+        const SYSTEM_PROMPT_TEMPLATE = `你是一个阅读助理，分析我上传的书籍。《{{BOOK_NAME}}》 - 作者
+
+请按照以下几个方面对本书进行阅读分析:
+
+1，判断书籍的类型(实用性书籍?想象文学?历史书籍?科学与数学书籍?哲学书籍?社会科学书籍?等)。
+
+2，执行检视阅读：提取书名、目录、序言、摘要等信息，列出作者在书中强调的某些重要论点。
+
+3，进行分析阅读：总结本书的主题、核心论点、主要章节及其关系，总结作者最想回答或解决的根本问题是什么，梳理作者的论证过程。
+
+4，进行分析阅读：
+提炼作者在书中提出的“关键词”或“核心概念”，对于每个概念，请解释作者赋予它的具体含义和独特解读。
+提炼作者在书中提出的“核心论点”，并简要概述作者是如何论证它的（即提供了哪些理由、证据、例子）。
+
+5，批判阅读，识别书中内容存在的逻辑谬误以及未解决的问题（知识不足、知识有误、逻辑不通、分析不完整等，请至少指出一个潜在的批判点，并简要说明理由）。
+
+6，主题阅读，搜索类似主题的其它书籍并比较不同作者的观点，识别共识和分歧。
+
+7，在阅读过程中，请你主动提问、总结以及用自己的话语进行解释。
+
+8.使用中文回答
+
+9结构清晰 排版疏朗和谐 
+
+10用markdown语法输出`;
+
+        let currentFileContent = "";
+        let currentFileName = "";
+
+        // ================= 初始化 =================
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        });
+
+        // ================= 文件处理 =================
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // UI Reset
+            document.getElementById('filename-display').innerText = file.name;
+            document.getElementById('file-status').classList.remove('hidden');
+            document.getElementById('generate-btn').classList.remove('hidden');
+            document.getElementById('generate-btn').classList.add('flex');
+            document.getElementById('markdown-output').innerHTML = ''; // 清空上次
+            document.getElementById('raw-output').value = '';
+            
+            // Parsing
+            try {
+                const btn = document.getElementById('generate-btn');
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 解析中...';
+                btn.disabled = true;
+
+                currentFileName = file.name;
+                currentFileContent = await parseFile(file);
+                
+                document.getElementById('prop-words').innerText = currentFileContent.length;
+                btn.innerHTML = '<i class="fa-solid fa-sparkles text-yellow-400"></i> 开始深度分析';
+                btn.disabled = false;
+            } catch (err) {
+                alert("文件解析出错: " + err.message);
+                document.getElementById('generate-btn').innerHTML = '解析失败';
+            }
+        });
+
+        async function parseFile(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (ext === 'txt' || ext === 'md') return await file.text();
+            
+            if (ext === 'docx') {
+                const arrayBuffer = await file.arrayBuffer();
+                const result = await mammoth.extractRawText({ arrayBuffer });
+                return result.value;
+            }
+            
+            if (ext === 'pdf') {
+                const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+                let text = "";
+                // 读取前 30 页
+                for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    text += content.items.map(item => item.str).join(' ') + "\n";
+                }
+                return text;
+            }
+
+            if (ext === 'epub') {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const book = ePub(e.target.result);
+                        let text = "";
+                        let count = 0;
+                        book.ready.then(() => {
+                            // 暴力读取前10章
+                            book.spine.each(section => {
+                                if(count++ < 10) {
+                                    section.load(book.load.bind(book)).then(doc => {
+                                        text += (doc.body.innerText || doc.body.textContent) + "\n\n";
+                                        if(count >= 10 || count >= book.spine.length) resolve(text);
+                                    });
+                                }
+                            });
+                            // Fallback if spine loop fails
+                            setTimeout(() => resolve(text), 3000); 
+                        });
+                    };
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+            throw new Error("不支持的格式");
+        }
+
+        // ================= AI 核心逻辑 =================
+        async function startAnalysis() {
+            const apiKey = localStorage.getItem('ai_key');
+            const apiUrl = localStorage.getItem('ai_url');
+            const model = localStorage.getItem('ai_model');
+
+            if (!apiKey) return toggleSettings();
+
+            // Setup UI
+            const card = document.getElementById('result-card');
+            card.classList.remove('hidden');
+            document.getElementById('doc-title').innerText = currentFileName.replace(/\.[^/.]+$/, "");
+            document.getElementById('prop-time').innerText = new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+            document.getElementById('prop-model').innerText = model;
+            
+            const mdOutput = document.getElementById('markdown-output');
+            const rawOutput = document.getElementById('raw-output');
+            const statusText = document.getElementById('status-text');
+
+            mdOutput.innerHTML = '<p class="text-gray-400 italic">正在思考并撰写...</p>';
+            rawOutput.value = "";
+            statusText.classList.remove('hidden');
+            statusText.innerText = "Generating...";
+            statusText.className = "text-blue-600 font-bold animate-pulse ml-auto";
+
+            let fullContent = "";
+
+            try {
+                // 截取前 35000 字
+                const contentToSend = currentFileContent.substring(0, 35000);
+                const finalSystemPrompt = SYSTEM_PROMPT_TEMPLATE.replace('{{BOOK_NAME}}', currentFileName);
+
+                const response = await fetch(`${apiUrl}/chat/completions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [
+                            { role: "system", content: finalSystemPrompt },
+                            { role: "user", content: "书籍内容如下：\n" + contentToSend }
+                        ],
+                        stream: true
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.text();
+                    throw new Error(`API Error: ${response.status} - ${err}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep last incomplete line
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed || trimmed === 'data: [DONE]') continue;
+                        
+                        if (trimmed.startsWith('data: ')) {
+                            try {
+                                const jsonStr = trimmed.substring(6);
+                                const json = JSON.parse(jsonStr);
+                                const delta = json.choices[0]?.delta?.content || "";
+                                
+                                if (delta) {
+                                    fullContent += delta;
+                                    rawOutput.value = fullContent;
+                                    mdOutput.innerHTML = DOMPurify.sanitize(marked.parse(fullContent));
+                                }
+                            } catch (e) {
+                                // ignore
+                            }
+                        }
+                    }
+                }
+
+                statusText.innerText = "Completed";
+                statusText.className = "text-green-600 font-bold ml-auto";
+
+            } catch (err) {
+                statusText.innerText = "Error";
+                statusText.className = "text-red-600 font-bold ml-auto";
+                mdOutput.innerHTML += `<div class="p-4 bg-red-50 text-red-600 rounded border border-red-200 mt-4">
+                    <strong>生成出错:</strong> ${err.message}<br>
+                    请检查 Key 是否正确，或是否需要开启 VPN。
+                </div>`;
+            }
+        }
+
+        // ================= 设置与工具函数 (已修复) =================
+        function toggleSettings() {
+            const modal = document.getElementById('settings-modal');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) {
+                loadSettings();
+            }
+        }
+
+        function applyPreset(type) {
+            if (type === 'gemini') {
+                document.getElementById('api-url').value = "https://generativelanguage.googleapis.com/v1beta/openai";
+                document.getElementById('api-model').value = "gemini-1.5-flash";
+                document.getElementById('gemini-link').classList.remove('hidden');
+                showMsg('已应用 Gemini 预设', 'text-blue-600');
+            } else {
+                document.getElementById('api-url').value = "https://api.openai.com/v1";
+                document.getElementById('api-model').value = "gpt-4o-mini";
+                document.getElementById('gemini-link').classList.add('hidden');
+                showMsg('已应用 OpenAI 预设', 'text-green-600');
+            }
+        }
+
+        function saveSettings() {
+            localStorage.setItem('ai_url', document.getElementById('api-url').value.replace(/\/$/, ""));
+            localStorage.setItem('ai_key', document.getElementById('api-key').value);
+            localStorage.setItem('ai_model', document.getElementById('api-model').value);
+            showMsg('✅ 配置已保存', 'text-green-600');
+            setTimeout(toggleSettings, 800);
+        }
+
+        function loadSettings() {
+            document.getElementById('api-url').value = localStorage.getItem('ai_url') || '';
+            document.getElementById('api-key').value = localStorage.getItem('ai_key') || '';
+            document.getElementById('api-model').value = localStorage.getItem('ai_model') || '';
+        }
+
+        async function testConnection() {
+            const url = document.getElementById('api-url').value.replace(/\/$/, "");
+            const key = document.getElementById('api-key').value;
+            const model = document.getElementById('api-model').value;
+            const btn = document.getElementById('test-btn');
+            
+            if(!key) return showMsg('请输入 API Key', 'text-red-500');
+
+            btn.disabled = true;
+            btn.innerText = "连接中...";
+            
+            try {
+                const res = await fetch(`${url}/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [{role: "user", content: "Hi"}],
+                        max_tokens: 5
+                    })
+                });
+                
+                if (res.ok) {
+                    showMsg('✅ 连接成功！', 'text-green-600');
+                } else {
+                    const err = await res.json();
+                    showMsg(`❌ 失败: ${err.error?.message || res.status}`, 'text-red-500');
+                }
+            } catch (e) {
+                showMsg('❌ 网络错误 (请检查代理)', 'text-red-500');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "测试连接";
+            }
+        }
+
+        function showMsg(txt, color) {
+            const box = document.getElementById('msg-box');
+            box.innerText = txt;
+            box.className = `mt-2 text-center text-xs h-4 ${color}`;
+        }
+
+        function toggleEye() {
+            const input = document.getElementById('api-key');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function switchView(mode) {
+            const preview = document.getElementById('markdown-output');
+            const raw = document.getElementById('raw-output');
+            const btnP = document.getElementById('btn-preview');
+            const btnR = document.getElementById('btn-raw');
+
+            if (mode === 'preview') {
+                preview.classList.remove('hidden');
+                raw.classList.add('hidden');
+                btnP.classList.add('bg-white', 'shadow-sm', 'text-gray-800');
+                btnP.classList.remove('text-gray-500');
+                btnR.classList.remove('bg-white', 'shadow-sm', 'text-gray-800');
+                btnR.classList.add('text-gray-500');
+            } else {
+                preview.classList.add('hidden');
+                raw.classList.remove('hidden');
+                btnR.classList.add('bg-white', 'shadow-sm', 'text-gray-800');
+                btnR.classList.remove('text-gray-500');
+                btnP.classList.remove('bg-white', 'shadow-sm', 'text-gray-800');
+                btnP.classList.add('text-gray-500');
+            }
+        }
+    </script>
+</body>
+</html>
+
